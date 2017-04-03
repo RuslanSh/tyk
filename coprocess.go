@@ -103,7 +103,9 @@ func (c *CoProcessor) GetObjectFromRequest(r *http.Request) *coprocess.Object {
 
 	object.HookType = c.HookType
 
-	object.Metadata = make(map[string]string)
+	object.Metadata = map[string]string{
+		"RequestURI": r.RequestURI,
+	}
 	object.Spec = make(map[string]string)
 
 	// Append spec data:
