@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -545,6 +546,16 @@ func loadApps(apiSpecs []*APISpec, muxer *mux.Router) {
 			"prefix": "main",
 		}).Info("API hostname set: ", hostname)
 	}
+
+	log.WithFields(logrus.Fields{
+		"prefix": "main",
+	}).Info("CONFIG", fmt.Sprint(config))
+
+	log.WithFields(logrus.Fields{
+		"prefix": "main",
+	}).Info("HTTP CONFIG SKIP_CLEAN", fmt.Sprint(config.HttpServerOptions.SkipURLCleaning))
+	muxer.SkipClean(config.HttpServerOptions.SkipURLCleaning)
+
 	ListenPathMap = cmap.New()
 	// load the APi defs
 	log.WithFields(logrus.Fields{
@@ -574,6 +585,7 @@ func loadApps(apiSpecs []*APISpec, muxer *mux.Router) {
 					"domain":   referenceSpec.Domain,
 				}).Info("Custom Domain set.")
 				subrouter = mainRouter.Host(referenceSpec.Domain).Subrouter()
+				subrouter.SkipClean(config.HttpServerOptions.SkipURLCleaning)
 			}
 			chainObj := processSpec(referenceSpec, redisStore, redisOrgStore, healthStore, rpcAuthStore, rpcOrgStore, subrouter)
 			chainObj.Index = i
