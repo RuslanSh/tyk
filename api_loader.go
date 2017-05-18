@@ -545,6 +545,7 @@ func loadApps(apiSpecs []*APISpec, muxer *mux.Router) {
 			"prefix": "main",
 		}).Info("API hostname set: ", hostname)
 	}
+
 	ListenPathMap = cmap.New()
 	// load the APi defs
 	log.WithFields(logrus.Fields{

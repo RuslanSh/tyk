@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"io"
-	"net/http"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -92,7 +91,7 @@ func doLoadWithBackup(specs []*APISpec) {
 	GlobalEventsJSVM.Init()
 	log.Warning("[RPC Backup] --> Initialised JSVM")
 
-	newRouter := mux.NewRouter()
+	newRouter := mux.NewRouter().SkipClean(config.HttpServerOptions.SkipURLCleaning)
 	mainRouter = newRouter
 
 	log.Warning("[RPC Backup] --> Set up routers")
@@ -104,10 +103,7 @@ func doLoadWithBackup(specs []*APISpec) {
 	loadApps(specs, newRouter)
 	log.Warning("[RPC Backup] --> API Load Done")
 
-	newServeMux := http.NewServeMux()
-	newServeMux.Handle("/", mainRouter)
-
-	http.DefaultServeMux = newServeMux
+	router.Swap(newRouter)
 	log.Warning("[RPC Backup] --> Replaced muxer")
 
 	log.WithFields(logrus.Fields{
