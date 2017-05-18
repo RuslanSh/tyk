@@ -56,8 +56,8 @@ var (
 	apisByID map[string]*APISpec
 	keyGen   DefaultKeyGenerator
 
+	router	      = &routerSwapper{}
 	mainRouter    *mux.Router
-	defaultRouter *mux.Router
 	controlRouter *mux.Router
 	LE_MANAGER    letsencrypt.Manager
 	LE_FIRSTRUN   bool
@@ -90,8 +90,8 @@ func pingTest(w http.ResponseWriter, r *http.Request) {
 
 // Create all globals and init connection handlers
 func setupGlobals() {
-	mainRouter = mux.NewRouter()
-	defaultRouter = mainRouter
+	mainRouter = mux.NewRouter().SkipClean(config.HttpServerOptions.SkipURLCleaning)
+	router.Swap(mainRouter)
 
 	controlRouter = mux.NewRouter()
 
@@ -630,18 +630,14 @@ func doReload() {
 	log.WithFields(logrus.Fields{
 		"prefix": "main",
 	}).Info("Preparing new router")
-	newRouter := mux.NewRouter()
-	mainRouter = newRouter
 
+	mainRouter = mux.NewRouter().SkipClean(config.HttpServerOptions.SkipURLCleaning)
 	if config.ControlAPIPort == 0 {
-		loadAPIEndpoints(newRouter)
+		loadAPIEndpoints(mainRouter)
 	}
-	loadApps(specs, newRouter)
+	loadApps(specs, mainRouter)
 
-	newServeMux := http.NewServeMux()
-	newServeMux.Handle("/", mainRouter)
-
-	http.DefaultServeMux = newServeMux
+	router.Swap(mainRouter)
 
 	log.WithFields(logrus.Fields{
 		"prefix": "main",
@@ -1076,11 +1072,11 @@ func start(arguments map[string]interface{}) {
 			"prefix": "main",
 		}).Debug("Adding pprof endpoints")
 
-		defaultRouter.HandleFunc("/debug/pprof/{rest:.*}", pprof_http.Index)
-		defaultRouter.HandleFunc("/debug/pprof/cmdline", pprof_http.Cmdline)
-		defaultRouter.HandleFunc("/debug/pprof/profile", pprof_http.Profile)
-		defaultRouter.HandleFunc("/debug/pprof/symbol", pprof_http.Symbol)
-		defaultRouter.HandleFunc("/debug/pprof/trace", pprof_http.Trace)
+		mainRouter.HandleFunc("/debug/pprof/{rest:.*}", pprof_http.Index)
+		mainRouter.HandleFunc("/debug/pprof/cmdline", pprof_http.Cmdline)
+		mainRouter.HandleFunc("/debug/pprof/profile", pprof_http.Profile)
+		mainRouter.HandleFunc("/debug/pprof/symbol", pprof_http.Symbol)
+		mainRouter.HandleFunc("/debug/pprof/trace", pprof_http.Trace)
 	}
 
 	// Set up a default org manager so we can traverse non-live paths
@@ -1095,7 +1091,7 @@ func start(arguments map[string]interface{}) {
 	}
 
 	if config.ControlAPIPort == 0 {
-		loadAPIEndpoints(defaultRouter)
+		loadAPIEndpoints(mainRouter)
 	}
 
 	// Start listening for reload messages
@@ -1250,7 +1246,7 @@ func listen(l, controlListener net.Listener, err error) {
 		if !RPC_EmergencyMode {
 			specs := getAPISpecs()
 			if specs != nil {
-				loadApps(specs, defaultRouter)
+				loadApps(specs, mainRouter)
 				getPolicies()
 			}
 
@@ -1261,11 +1257,6 @@ func listen(l, controlListener net.Listener, err error) {
 
 		// Use a custom server so we can control keepalives
 		if config.HttpServerOptions.OverrideDefaults {
-			defaultRouter.SkipClean(config.HttpServerOptions.SkipURLCleaning)
-
-			log.WithFields(logrus.Fields{
-				"prefix": "main",
-			}).Info("Custom gateway started")
 			log.WithFields(logrus.Fields{
 				"prefix": "main",
 			}).Warning("HTTP Server Overrides detected, this could destabilise long-running http-requests")
@@ -1273,14 +1264,14 @@ func listen(l, controlListener net.Listener, err error) {
 				Addr:         ":" + targetPort,
 				ReadTimeout:  time.Duration(readTimeout) * time.Second,
 				WriteTimeout: time.Duration(writeTimeout) * time.Second,
+				Handler:      router,
 			}
-
-			newServeMux := http.NewServeMux()
-			newServeMux.Handle("/", defaultRouter)
-			http.DefaultServeMux = newServeMux
 
 			// Accept connections in a new goroutine.
 			go s.Serve(l)
+			log.WithFields(logrus.Fields{
+				"prefix": "main",
+			}).Info("Custom gateway started")
 
 			if controlListener != nil {
 				cs := &http.Server{
@@ -1297,13 +1288,9 @@ func listen(l, controlListener net.Listener, err error) {
 				"prefix": "main",
 			}).Printf("Gateway started (%s)", VERSION)
 
-			go http.Serve(l, nil)
+			go http.Serve(l, router)
 
 			if !RPC_EmergencyMode {
-				newServeMux := http.NewServeMux()
-				newServeMux.Handle("/", mainRouter)
-				http.DefaultServeMux = newServeMux
-
 				if controlListener != nil {
 					go http.Serve(controlListener, controlRouter)
 				}
@@ -1337,7 +1324,7 @@ func listen(l, controlListener net.Listener, err error) {
 		if !RPC_EmergencyMode {
 			specs := getAPISpecs()
 			if specs != nil {
-				loadApps(specs, defaultRouter)
+				loadApps(specs, mainRouter)
 				getPolicies()
 			}
 
@@ -1356,16 +1343,13 @@ func listen(l, controlListener net.Listener, err error) {
 				Addr:         ":" + targetPort,
 				ReadTimeout:  time.Duration(readTimeout) * time.Second,
 				WriteTimeout: time.Duration(writeTimeout) * time.Second,
+				Handler:      router,
 			}
 
-			newServeMux := http.NewServeMux()
-			newServeMux.Handle("/", defaultRouter)
-			http.DefaultServeMux = newServeMux
-
+			go s.Serve(l)
 			log.WithFields(logrus.Fields{
 				"prefix": "main",
 			}).Info("Custom gateway started")
-			go s.Serve(l)
 
 			if controlListener != nil {
 				cs := &http.Server{
@@ -1382,13 +1366,9 @@ func listen(l, controlListener net.Listener, err error) {
 				"prefix": "main",
 			}).Printf("Gateway resumed (%s)", VERSION)
 
-			go http.Serve(l, nil)
+			go http.Serve(l, router)
 
 			if !RPC_EmergencyMode {
-				newServeMux := http.NewServeMux()
-				newServeMux.Handle("/", mainRouter)
-				http.DefaultServeMux = newServeMux
-
 				if controlListener != nil {
 					go http.Serve(controlListener, controlRouter)
 				}
