@@ -642,7 +642,7 @@ func TestGroupResetHandler(t *testing.T) {
 }
 
 func TestHotReloadSingle(t *testing.T) {
-	oldRouter := mainRouter
+	oldRouter := router.Current()
 	var wg sync.WaitGroup
 	if !reloadURLStructure(wg.Done) {
 		t.Fatal("reload wasn't queued")
@@ -650,7 +650,7 @@ func TestHotReloadSingle(t *testing.T) {
 	wg.Add(1)
 	reloadTick <- time.Time{}
 	wg.Wait()
-	if mainRouter == oldRouter {
+	if router.Current() == oldRouter {
 		t.Fatal("router wasn't swapped")
 	}
 }

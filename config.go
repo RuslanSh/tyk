@@ -152,6 +152,12 @@ type CoProcessConfig struct {
 	CoProcessGRPCServer string `json:"coprocess_grpc_server"`
 }
 
+type NewRelicConfig struct {
+	Enabled bool   `json:"enabled"`
+	License string `json:"license_key"`
+	AppName string `json:"app_name"`
+}
+
 // Config is the configuration object used by tyk to set up various parameters.
 type Config struct {
 	ListenAddress                     string                 `json:"listen_address"`
@@ -234,6 +240,7 @@ type Config struct {
 	MaxIdleConnsPerHost               int                                   `bson:"max_idle_connections_per_host" json:"max_idle_connections_per_host"`
 	ReloadWaitTime                    int                                   `bson:"reload_wait_time" json:"reload_wait_time"`
 	ProxySSLInsecureSkipVerify        bool                                  `json:"proxy_ssl_insecure_skip_verify"`
+	NewRelic                          NewRelicConfig                        `json:"newrelic"`
 }
 
 type CertData struct {

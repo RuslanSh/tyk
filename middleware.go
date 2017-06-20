@@ -9,6 +9,7 @@ import (
 	"github.com/gocraft/health"
 	"github.com/justinas/alice"
 	"github.com/paulbellamy/ratecounter"
+	"github.com/newrelic/go-agent"
 )
 
 var GlobalRate = ratecounter.NewRateCounter(1 * time.Second)
@@ -49,6 +50,9 @@ func CreateMiddleware(mw TykMiddlewareImplementation, tykMwSuper *TykMiddleware)
 
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if txn, ok := w.(newrelic.Transaction); ok {
+				defer newrelic.StartSegment(txn, mw.GetName()).End()
+			}
 			job := instrument.NewJob("MiddlewareCall")
 			meta := health.Kvs{
 				"from_ip":  r.RemoteAddr,

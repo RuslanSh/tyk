@@ -25,6 +25,7 @@ import (
 	"github.com/pmylund/go-cache"
 
 	"github.com/TykTechnologies/tyk/apidef"
+	"github.com/newrelic/go-agent"
 )
 
 var ServiceCache *cache.Cache
@@ -426,6 +427,10 @@ func GetTransport(timeOut int, rw http.ResponseWriter, req *http.Request, p *Rev
 	if IsWebsocket(req) {
 		wsTransport := &WSDialer{transport, rw, p.TLSClientConfig}
 		return wsTransport
+	}
+
+	if txn, ok := rw.(newrelic.Transaction); ok {
+		return newrelic.NewRoundTripper(txn, transport)
 	}
 
 	return transport

@@ -56,8 +56,7 @@ var (
 	apisByID map[string]*APISpec
 	keyGen   DefaultKeyGenerator
 
-	router	      = &routerSwapper{}
-	mainRouter    *mux.Router
+	router        *routerSwapper
 	controlRouter *mux.Router
 	LE_MANAGER    letsencrypt.Manager
 	LE_FIRSTRUN   bool
@@ -90,9 +89,7 @@ func pingTest(w http.ResponseWriter, r *http.Request) {
 
 // Create all globals and init connection handlers
 func setupGlobals() {
-	mainRouter = mux.NewRouter().SkipClean(config.HttpServerOptions.SkipURLCleaning)
-	router.Swap(mainRouter)
-
+	router = &routerSwapper{}
 	controlRouter = mux.NewRouter()
 
 	if config.EnableAnalytics && config.Storage.Type != "redis" {
@@ -167,6 +164,9 @@ func setupGlobals() {
 		config.AnalyticsConfig.NormaliseUrls.compiledPatternSet = initNormalisationPatterns()
 	}
 
+	if config.NewRelic.Enabled {
+		setupNewRelic()
+	}
 }
 
 func buildConnStr(resource string) string {
@@ -284,13 +284,14 @@ func loadAPIEndpoints(muxer *mux.Router) {
 	if config.ControlAPIHostname != "" {
 		hostname = config.ControlAPIHostname
 	}
-	r := muxer.PathPrefix("/tyk").Subrouter()
+	r := muxer
 	if hostname != "" {
 		r = muxer.Host(hostname).Subrouter()
 		log.WithFields(logrus.Fields{
 			"prefix": "main",
 		}).Info("Control API hostname set: ", hostname)
 	}
+	r = r.PathPrefix("/tyk").Subrouter()
 	log.WithFields(logrus.Fields{
 		"prefix": "main",
 	}).Info("Initialising Tyk REST API Endpoints")
@@ -321,6 +322,19 @@ func loadAPIEndpoints(muxer *mux.Router) {
 	log.WithFields(logrus.Fields{
 		"prefix": "main",
 	}).Debug("Loaded API Endpoints")
+}
+
+func loadProfilingEndpoints(muxer *mux.Router) {
+	log.WithFields(logrus.Fields{
+		"prefix": "main",
+	}).Debug("Adding pprof endpoints")
+
+	r := muxer.PathPrefix("/debug/pprof").Subrouter()
+	r.HandleFunc("/{rest:.*}", pprof_http.Index)
+	r.HandleFunc("/cmdline", pprof_http.Cmdline)
+	r.HandleFunc("/profile", pprof_http.Profile)
+	r.HandleFunc("/symbol", pprof_http.Symbol)
+	r.HandleFunc("/trace", pprof_http.Trace)
 }
 
 // checkIsAPIOwner will ensure that the accessor of the tyk API has the
@@ -631,13 +645,9 @@ func doReload() {
 		"prefix": "main",
 	}).Info("Preparing new router")
 
-	mainRouter = mux.NewRouter().SkipClean(config.HttpServerOptions.SkipURLCleaning)
-	if config.ControlAPIPort == 0 {
-		loadAPIEndpoints(mainRouter)
-	}
-	loadApps(specs, mainRouter)
-
-	router.Swap(mainRouter)
+	newRouter := router.Build()
+	loadApps(specs, newRouter)
+	router.Swap(newRouter)
 
 	log.WithFields(logrus.Fields{
 		"prefix": "main",
@@ -1068,15 +1078,13 @@ func start(arguments map[string]interface{}) {
 		defer pprof.StopCPUProfile()
 	}
 	if arguments["--httpprofile"] == true {
-		log.WithFields(logrus.Fields{
-			"prefix": "main",
-		}).Debug("Adding pprof endpoints")
+		router.PreProcess(loadProfilingEndpoints)
+	}
 
-		mainRouter.HandleFunc("/debug/pprof/{rest:.*}", pprof_http.Index)
-		mainRouter.HandleFunc("/debug/pprof/cmdline", pprof_http.Cmdline)
-		mainRouter.HandleFunc("/debug/pprof/profile", pprof_http.Profile)
-		mainRouter.HandleFunc("/debug/pprof/symbol", pprof_http.Symbol)
-		mainRouter.HandleFunc("/debug/pprof/trace", pprof_http.Trace)
+	if config.ControlAPIPort > 0 {
+		loadAPIEndpoints(controlRouter)
+	} else {
+		router.PreProcess(loadAPIEndpoints)
 	}
 
 	// Set up a default org manager so we can traverse non-live paths
@@ -1088,10 +1096,6 @@ func start(arguments map[string]interface{}) {
 		DefaultOrgStore.Init(getGlobalStorageHandler("orgkey.", false))
 		//DefaultQuotaStore.Init(getGlobalStorageHandler(CloudHandler, "orgkey.", false))
 		DefaultQuotaStore.Init(getGlobalStorageHandler("orgkey.", false))
-	}
-
-	if config.ControlAPIPort == 0 {
-		loadAPIEndpoints(mainRouter)
 	}
 
 	// Start listening for reload messages
@@ -1244,15 +1248,14 @@ func listen(l, controlListener net.Listener, err error) {
 		startDRL()
 
 		if !RPC_EmergencyMode {
+			newRouter := router.Build()
 			specs := getAPISpecs()
 			if specs != nil {
-				loadApps(specs, mainRouter)
+				loadApps(specs, newRouter)
 				getPolicies()
 			}
 
-			if config.ControlAPIPort > 0 {
-				loadAPIEndpoints(controlRouter)
-			}
+			router.Swap(newRouter)
 		}
 
 		// Use a custom server so we can control keepalives
@@ -1322,16 +1325,14 @@ func listen(l, controlListener net.Listener, err error) {
 
 		// Resume accepting connections in a new goroutine.
 		if !RPC_EmergencyMode {
+			newRouter := router.Build()
 			specs := getAPISpecs()
 			if specs != nil {
-				loadApps(specs, mainRouter)
+				loadApps(specs, newRouter)
 				getPolicies()
 			}
 
-			if config.ControlAPIPort > 0 {
-				loadAPIEndpoints(controlRouter)
-			}
-
+			router.Swap(newRouter)
 			startHeartBeat()
 		}
 
